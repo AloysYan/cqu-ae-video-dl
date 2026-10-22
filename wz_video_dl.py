@@ -19,6 +19,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -28,17 +29,19 @@ import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-BASE = "http://10.236.22.253"
+BASE = os.environ.get("WZ_BASE", "http://10.236.22.253").rstrip("/")
 
-# 公共演示账号：学院公开分发给学生的资源站账号，不是个人凭据
-USER = "20170001"
-PWD = "123456"
+# 公共演示账号：学院公开分发给学生的资源站账号，不是个人凭据。
+# 换站/换号可用环境变量覆盖：WZ_BASE / WZ_USER / WZ_PWD / WZ_OUT
+USER = os.environ.get("WZ_USER", "20170001")
+PWD = os.environ.get("WZ_PWD", "123456")
 
 XUEYUAN_ID = "1604181156434889790"
-DEFAULT_OUT = os.path.expanduser("~/Desktop/实验视频")
+DEFAULT_OUT = os.environ.get("WZ_OUT", os.path.join(
+    os.path.expanduser("~"), "Desktop", "实验视频"))
 
 # 会话文件里只有一个 ASP.NET_SessionId（约等于一张临时登录票据），固定 600
-SESSION_FILE = os.path.expanduser("~/.wz_session.json")
+SESSION_FILE = os.path.join(os.path.expanduser("~"), ".wz_session.json")
 SESSION_MODE = 0o600
 
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
@@ -68,6 +71,20 @@ def _width(s):
 
 def pad(s, n):
     return s + " " * max(0, n - _width(s))
+
+
+def open_file(path):
+    """跨平台打开文件：macOS 用 open，Windows 用 startfile，Linux 用 xdg-open。"""
+    try:
+        if sys.platform == "darwin":
+            subprocess.run(["open", path], check=False)
+        elif os.name == "nt":
+            os.startfile(path)          # noqa: 只在 Windows 存在
+        else:
+            subprocess.run(["xdg-open", path], check=False)
+        return True
+    except Exception:
+        return False
 
 
 # ------------------------------------------------------------------ HTTP
@@ -123,7 +140,8 @@ def do_login():
             sid = _grab_captcha(sid, cap)
             if not sid:
                 sys.exit("× 验证码接口没有下发 ASP.NET_SessionId，站点行为可能变了")
-            subprocess.run(["open", cap], check=False)
+            if not open_file(cap):
+                say("  打不开图片，请手动查看：%s" % cap)
             code = input("→ 验证码图已弹出(%d/3)，输入后回车：" % attempt).strip()
             if not code:
                 continue
@@ -269,10 +287,26 @@ def classify(arg):
 
 # ------------------------------------------------------------------ 下载
 
+def ytdlp_prefix():
+    """找到 yt-dlp：优先 PATH 里的可执行文件，其次当前解释器的 yt_dlp 模块。"""
+    exe = shutil.which("yt-dlp")
+    if exe:
+        return [exe]
+    try:
+        import yt_dlp  # noqa: F401
+        return [sys.executable, "-m", "yt_dlp"]
+    except Exception:
+        return None
+
+
 def ytdlp(url, target, referer, quiet=False):
-    cmd = ["yt-dlp", "--referer", referer, "--user-agent", UA,
-           "--continue", "--retries", "10", "--fragment-retries", "10",
-           "--socket-timeout", "30", "--no-warnings"]
+    prefix = ytdlp_prefix()
+    if not prefix:
+        say("  ! 找不到 yt-dlp，请先安装：brew install yt-dlp  或  pip install -U yt-dlp")
+        return False
+    cmd = prefix + ["--referer", referer, "--user-agent", UA,
+                    "--continue", "--retries", "10", "--fragment-retries", "10",
+                    "--socket-timeout", "30", "--no-warnings"]
     if quiet:
         cmd += ["--quiet", "--no-progress"]
     cmd += ["-o", target, url]

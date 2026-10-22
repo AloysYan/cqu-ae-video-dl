@@ -23,3 +23,6 @@ venv/
 
 # 本机 agent 工作目录（不参与开源）
 .workbuddy/
+
+# 打包产物：只作为 release 附件上传，不进仓库
+dist/
