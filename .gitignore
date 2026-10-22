@@ -1,3 +1,6 @@
+# 本文档
+.gitignore
+
 # 会话票据：等同临时登录凭证，绝不能进仓库
 .wz_session.json
 
